@@ -43,8 +43,6 @@ go-pinjam/
 │
 ├── app.py                        # Main Streamlit application
 ├── alibaba_ai.py                 # Alibaba Qwen AI explanation module
-├── transactions_cleaned.csv      # Raw transaction data (local fallback)
-├── predictions_output.csv        # XGBoost model output (local fallback)
 └── requirements.txt              # Python dependencies
 ```
 
