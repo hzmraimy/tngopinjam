@@ -1,0 +1,17 @@
+# Virtual environments
+myenv/
+myenv311/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+
+# Logs
+*.log
