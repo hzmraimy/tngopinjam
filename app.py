@@ -7,12 +7,26 @@ import pandas as pd
 import numpy as np
 from scipy.stats import entropy
 from sklearn.preprocessing import MinMaxScaler
+from alibaba_ai import get_explanation
+import boto3
+from botocore.exceptions import NoCredentialsError
 
-# ─── Resolve paths relative to this script ────────────────────────────────────
-# Works regardless of which directory you launch `streamlit run` from.
+# ─── S3 Configuration ─────────────────────────────────────────────────────────
+# Change these to your AWS region and bucket name
+AWS_REGION = "ap-southeast-1"  # Change to your region
+S3_BUCKET = "tngdgo-pinjam"  # Change to your S3 bucket
+
+
+# S3 file paths
+TRANSACTIONS_CSV = f"s3://{S3_BUCKET}/input/transactions_cleaned.csv"
+PREDICTIONS_CSV  = f"s3://{S3_BUCKET}/output/predictions_output.csv"
+
+# Fallback to local files if S3 not configured
 BASE_DIR = Path(__file__).parent
-TRANSACTIONS_CSV = BASE_DIR / 'transactions_cleaned.csv'
-PREDICTIONS_CSV  = BASE_DIR / 'predictions_output.csv'
+LOCAL_TRANSACTIONS = BASE_DIR / 'transactions_cleaned.csv'
+LOCAL_PREDICTIONS  = BASE_DIR / 'predictions_output.csv'
+
+USE_S3 = S3_BUCKET != "tngdgo-pinjam"  # Auto-detect if S3 is configured
 
 # ─── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -22,21 +36,47 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ─── S3 Helper Functions ──────────────────────────────────────────────────────
+def get_s3_client():
+    """Create S3 client with credentials from environment or AWS config"""
+    try:
+        return boto3.client('s3', region_name=AWS_REGION)
+    except NoCredentialsError:
+        st.error("❌ AWS credentials not found. Configure AWS credentials.")
+        st.stop()
+
+@st.cache_data
+def load_csv_from_s3(s3_path: str):
+    """Load CSV directly from S3 using pandas"""
+    try:
+        return pd.read_csv(s3_path)
+    except Exception as e:
+        st.error(f"❌ Failed to load {s3_path}: {str(e)}")
+        st.stop()
+
+@st.cache_data
+def load_csv_from_local(file_path):
+    """Load CSV from local file system"""
+    if not file_path.exists():
+        st.error(f"❌ File not found: {file_path}\n\nMake sure `{file_path.name}` is in the same folder as `app.py`.")
+        st.stop()
+    return pd.read_csv(file_path)
+
 # ─── Load Data ────────────────────────────────────────────────────────────────
 @st.cache_data
 def load_data():
-    if not TRANSACTIONS_CSV.exists():
-        st.error(f"❌ File not found: {TRANSACTIONS_CSV}\n\nMake sure `transactions_cleaned.csv` is in the same folder as `app.py`.")
-        st.stop()
-    if not PREDICTIONS_CSV.exists():
-        st.error(f"❌ File not found: {PREDICTIONS_CSV}\n\nMake sure `predictions_output.csv` is in the same folder as `app.py`.")
-        st.stop()
-
-    df = pd.read_csv(TRANSACTIONS_CSV)
+    if USE_S3:
+        # Load from S3
+        df = load_csv_from_s3(TRANSACTIONS_CSV)
+        pred = load_csv_from_s3(PREDICTIONS_CSV)
+    else:
+        # Load from local files
+        df = load_csv_from_local(LOCAL_TRANSACTIONS)
+        pred = load_csv_from_local(LOCAL_PREDICTIONS)
+    
     df['transaction_date'] = pd.to_datetime(df['transaction_date'])
     df['year_month'] = df['transaction_date'].dt.to_period('M')
 
-    pred = pd.read_csv(PREDICTIONS_CSV)
     # predictions_output columns: user_id, predicted_risk, risk_label, credit_score, risk_tier
     return df, pred
 
@@ -516,11 +556,19 @@ IMPROVEMENTS_MAP = {
     ],
 }
 
-# ─── Session State ──────────────────────────────────────────────────────────────
-if 'tab'          not in st.session_state: st.session_state.tab          = 'Home'
-if 'report_state' not in st.session_state: st.session_state.report_state = 'landing'
-if 'logged_in'    not in st.session_state: st.session_state.logged_in    = False
-if 'user_id'      not in st.session_state: st.session_state.user_id      = 'USER_00001'
+# ─── Session State Initialization ────────────────────────────────────────────────
+if 'tab' not in st.session_state:
+    st.session_state.tab = 'Home'
+if 'report_state' not in st.session_state:
+    st.session_state.report_state = 'landing'
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = 'USER_00001'
+if 'ai_explanation' not in st.session_state:
+    st.session_state.ai_explanation = None
+if 'report_ai_explanation' not in st.session_state:
+    st.session_state.report_ai_explanation = None
 
 # ── LOGIN PAGE ──────────────────────────────────────────────────────────────────
 if not st.session_state.logged_in:
@@ -552,6 +600,49 @@ if not st.session_state.logged_in:
 
 # ─── Load USER data ────────────────────────────────────────────────────────────
 USER = get_user_data(st.session_state.user_id)
+
+# Build the payload that will be sent to the AI explanation service.
+
+def build_alibaba_payload(USER: dict) -> dict:
+    feat = USER.get('features')
+
+    # Spending stability from spending score pillar (0-1 → convert to 0-100)
+    spending_stability = 0
+    if feat is not None and 'score_spending' in feat:
+        spending_stability = round(float(feat['score_spending']) * 100, 1)
+
+    # Transactions per month from raw features
+    transactions_per_month = 0
+    if feat is not None and 'avg_monthly_txn_count' in feat:
+        transactions_per_month = round(float(feat['avg_monthly_txn_count']), 1)
+
+    # Merchant diversity from unique categories
+    merchant_diversity = 0
+    if feat is not None and 'unique_categories' in feat:
+        merchant_diversity = int(feat['unique_categories'])
+
+    # Top-up frequency
+    topup_count = 0
+    if feat is not None and 'topup_frequency' in feat:
+        topup_count = round(float(feat['topup_frequency']), 1)
+
+    # Refund count derived from failed rate
+    refund_count = 0
+    if feat is not None and 'failed_rate' in feat:
+        raw_failed = float(feat.get('raw_txn_count', 1))
+        refund_count = round(float(feat['failed_rate']) * raw_failed)
+
+    return {
+        'credit_score':       USER['score'],
+        'risk_label':         USER['risk_label'],
+        'risk_tier':          USER['risk_tier'],
+        'transactions':       transactions_per_month,
+        'merchant_diversity': merchant_diversity,
+        'topup_count':        topup_count,
+        'refund_count':       refund_count,
+        'spending_stability': spending_stability,
+    }
+
 if USER is None:
     st.error(f"No data found for {st.session_state.user_id}. Please select another user.")
     st.stop()
@@ -585,6 +676,10 @@ for i, (tab_name, icon) in enumerate(nav_icons.items()):
 with cols[4]:
     if st.button('Logout', key='logout_nav_btn', use_container_width=True):
         st.session_state.logged_in = False
+        st.session_state.tab = 'Home'
+        st.session_state.report_state = 'landing'
+        st.session_state.ai_explanation = None
+        st.session_state.report_ai_explanation = None
         st.rerun()
 
 active_colors = {'Home': '#00d4a0', 'Score': '#5b8ef0', 'History': '#f59e0b', 'Report': '#a855f7'}
@@ -703,6 +798,36 @@ elif st.session_state.tab == 'Score':
     st.markdown(label_html('HOW TO IMPROVE'), unsafe_allow_html=True)
     tips_html = ''.join(f'<div style="font-size:12px;color:#a0b0c0;padding:5px 0">→ {t}</div>' for t in IMPROVEMENTS)
     st.markdown(card(tips_html), unsafe_allow_html=True)
+
+    # Show the pillar sub-score chart for better visual insight.
+    score_chart_df = pd.DataFrame(
+        {label: [float(v)] for label, (v, mx, c) in SCORE_BREAKDOWN.items()}
+    ).T.rename(columns={0: 'score'})
+    score_chart_df.index.name = 'Pillar'
+    if not score_chart_df.empty:
+        st.markdown(label_html('PILLAR SCORES'), unsafe_allow_html=True)
+        st.bar_chart(score_chart_df['score'], height=320)
+
+    # ─── AI Explanation ────────────────────────────────────────────────────
+    st.markdown(label_html('AI EXPLANATION (Alibaba Qwen)'), unsafe_allow_html=True)
+
+    # Button to trigger AI explanation
+    if st.button('🤖 Generate AI Explanation', key='ai_explain_score'):
+        with st.spinner('Analyzing profile with Alibaba AI...'):
+            payload = build_alibaba_payload(USER)
+            explanation = get_explanation(payload)
+            st.session_state.ai_explanation = explanation
+
+    # Display explanation if generated
+    if st.session_state.ai_explanation is not None:
+        st.markdown(card(f"""
+            <div style="font-size:9px;letter-spacing:1.5px;color:#a855f7;margin-bottom:10px">
+                ☁ POWERED BY ALIBABA QWEN AI
+            </div>
+            <div style="font-size:12px;color:#a0b0c0;line-height:1.9;white-space:pre-wrap">
+                {st.session_state.ai_explanation}
+            </div>
+        """), unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════
 # TAB: HISTORY
@@ -890,8 +1015,7 @@ elif st.session_state.tab == 'Report':
         ]
         for k, (v, mx, _) in SCORE_BREAKDOWN.items():
             report_lines.append(f"{k:<26}: {v:>3}/{mx}")
-        report_lines += [
-        ]
+        report_lines += [""]
         report_text = "\n".join(report_lines)
 
         st.download_button(
@@ -910,3 +1034,25 @@ elif st.session_state.tab == 'Report':
         if st.button('↺ Regenerate', key='regen_btn'):
             st.session_state.report_state = 'landing'
             st.rerun()
+
+    # ─── AI Explanation in Report ─────────────────────────────────────────
+    st.markdown('<br>', unsafe_allow_html=True)
+    st.markdown(label_html('AI CREDIT ANALYSIS (Alibaba Qwen)'), unsafe_allow_html=True)
+
+    if st.button('🤖 Get AI Analysis', key='ai_report_btn'):
+        with st.spinner('Analyzing report with Alibaba AI...'):
+            payload = build_alibaba_payload(USER)
+            ai_text = get_explanation(payload)
+            st.session_state.report_ai_explanation = ai_text
+
+    if st.session_state.report_ai_explanation is not None:
+        st.markdown(card(f"""
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                <span style="font-size:9px;letter-spacing:1.5px;color:#a855f7">
+                    ☁ ALIBABA QWEN AI ANALYSIS
+                </span>
+            </div>
+            <div style="font-size:12px;color:#a0b0c0;line-height:1.9;white-space:pre-wrap">
+                {st.session_state.report_ai_explanation}
+            </div>
+        """), unsafe_allow_html=True)
