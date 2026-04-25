@@ -23,14 +23,9 @@ This app is deployed on Streamlit Cloud.
 
 - `app.py` - Main application
 - `requirements.txt` - Dependencies
-- `transactions_cleaned.csv` - Transaction data
-- `predictions_output.csv` - Precomputed predictions
 - `finalized/` - Model and notebook (optional)
 
-### Files to exclude:
 
-- Virtual environments (`myenv/`, `myenv311/`)
-- Cache files (`__pycache__/`, `.DS_Store`)
 
 ## Data
 
