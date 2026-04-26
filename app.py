@@ -30,7 +30,7 @@ USE_S3 = S3_BUCKET != "tngdgo-pinjam"  # Auto-detect if S3 is configured
 
 # ─── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="GO Pinjam",
+    page_title=f"GO Pinjam{USE_S3}",
     page_icon="💳",
     layout="wide",
     initial_sidebar_state="collapsed",
