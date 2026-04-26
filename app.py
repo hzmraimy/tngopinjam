@@ -75,7 +75,7 @@ def load_data():
         df = load_csv_from_local(LOCAL_TRANSACTIONS)
         pred = load_csv_from_local(LOCAL_PREDICTIONS)
     
-    df['transaction_date'] = pd.to_datetime(df['transaction_date'])
+    df['transaction_date'] = pd.to_datetime(df['transaction_date'],errors='coerce')
     df['year_month'] = df['transaction_date'].dt.to_period('M')
 
     # predictions_output columns: user_id, predicted_risk, risk_label, credit_score, risk_tier
