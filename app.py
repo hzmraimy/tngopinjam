@@ -23,14 +23,14 @@ PREDICTIONS_CSV  = f"s3://{S3_BUCKET}/output/predictions_output.csv"
 
 # Fallback to local files if S3 not configured
 BASE_DIR = Path(__file__).parent
-LOCAL_TRANSACTIONS = BASE_DIR / 'transactions_cleaned.csv'
-LOCAL_PREDICTIONS  = BASE_DIR / 'predictions_output.csv'
+#LOCAL_TRANSACTIONS = BASE_DIR / 'transactions_cleaned.csv'
+#LOCAL_PREDICTIONS  = BASE_DIR / 'predictions_output.csv'
 
 USE_S3 = S3_BUCKET != "tngdgo-pinjam"  # Auto-detect if S3 is configured
 
 # ─── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title=f"GO Pinjam{USE_S3}",
+    page_title="GO Pinjam",
     page_icon="💳",
     layout="wide",
     initial_sidebar_state="collapsed",
