@@ -38,12 +38,12 @@ st.set_page_config(
 
 # ─── S3 Helper Functions ──────────────────────────────────────────────────────
 def get_s3_client():
-    """Create S3 client with credentials from environment or AWS config"""
-    try:
-        return boto3.client('s3', region_name=AWS_REGION)
-    except NoCredentialsError:
-        st.error("❌ AWS credentials not found. Configure AWS credentials.")
-        st.stop()
+    return boto3.client(
+        's3',
+        region_name=AWS_REGION,
+        aws_access_key_id=st.secrets["connections"]["s3"]["aws_access_key_id"],
+        aws_secret_access_key=st.secrets["connections"]["s3"]["aws_secret_access_key"],
+    )
 
 @st.cache_data
 def load_csv_from_s3(s3_path: str):
