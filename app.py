@@ -69,10 +69,10 @@ def load_data():
         # Load from S3
         df = load_csv_from_s3(TRANSACTIONS_CSV)
         pred = load_csv_from_s3(PREDICTIONS_CSV)
-    else:
-        # Load from local files
-        df = load_csv_from_local(LOCAL_TRANSACTIONS)
-        pred = load_csv_from_local(LOCAL_PREDICTIONS)
+    # else:
+    #     # Load from local files
+    #     df = load_csv_from_local(LOCAL_TRANSACTIONS)
+    #     pred = load_csv_from_local(LOCAL_PREDICTIONS)
     
     df['transaction_date'] = pd.to_datetime(df['transaction_date'])
     df['year_month'] = df['transaction_date'].dt.to_period('M')
