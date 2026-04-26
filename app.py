@@ -64,7 +64,6 @@ def load_csv_from_local(file_path):
 
 # ─── Load Data ────────────────────────────────────────────────────────────────
 @st.cache_data
-get_s3_client()
 def load_data():
     if USE_S3:
         # Load from S3
